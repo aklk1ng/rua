@@ -7,13 +7,14 @@ use std::collections::HashMap;
 /// "print" function in Lula's std-lib
 /// supports only 1 argument and assumues the argument is at index:1 on stack
 fn lib_print(state: &mut ExeState) -> i32 {
-    println!("{:?}", state.stack[1]);
+    println!("{:?}", state.stack[state.func_index + 1]);
     0
 }
 
 pub struct ExeState {
     globals: HashMap<String, Value>,
     stack: Vec<Value>,
+    func_index: usize,
 }
 
 impl ExeState {
@@ -24,6 +25,7 @@ impl ExeState {
         Self {
             globals,
             stack: Vec::new(),
+            func_index: 0,
         }
     }
 
@@ -35,14 +37,62 @@ impl ExeState {
                     if let Value::String(key) = name {
                         let v = self.globals.get(key).unwrap_or(&Value::Nil).clone();
                         self.set_stack(dst, v);
+                    } else {
+                        panic!("invalid global key: {name:?}");
+                    }
+                }
+                ByteCode::SetGlobal(name, src) => {
+                    let name = proto.constants[name as usize].clone();
+                    if let Value::String(key) = name {
+                        let value = self.stack[src as usize].clone();
+                        self.globals.insert(key, value);
+                    } else {
+                        panic!("invalid global key: {name:?}");
+                    }
+                }
+                ByteCode::SetGlobalConst(name, src) => {
+                    let name = proto.constants[name as usize].clone();
+                    if let Value::String(key) = name {
+                        let value = proto.constants[src as usize].clone();
+                        self.globals.insert(key, value);
+                    } else {
+                        panic!("invalid global key: {name:?}");
+                    }
+                }
+                ByteCode::SetGlobalGlobal(name, src) => {
+                    let name = proto.constants[name as usize].clone();
+                    if let Value::String(key) = name {
+                        let src = &proto.constants[src as usize];
+                        if let Value::String(src) = src {
+                            let value = self.globals.get(src).unwrap_or(&Value::Nil).clone();
+                            self.globals.insert(key, value);
+                        } else {
+                            panic!("invalid global key: {src:?}");
+                        }
+                    } else {
+                        panic!("invalid global key: {name:?}");
                     }
                 }
                 ByteCode::LoadConst(dst, c) => {
                     let v = proto.constants[c as usize].clone();
                     self.set_stack(dst, v);
                 }
+                ByteCode::LoadNil(dst) => {
+                    self.set_stack(dst, Value::Nil);
+                }
+                ByteCode::LoadBool(dst, b) => {
+                    self.set_stack(dst, Value::Boolean(b));
+                }
+                ByteCode::LoadInt(dst, i) => {
+                    self.set_stack(dst, Value::Integer(i as i64));
+                }
+                ByteCode::Move(dst, src) => {
+                    let v = self.stack[src as usize].clone();
+                    self.set_stack(dst, v);
+                }
                 ByteCode::Call(func, _) => {
-                    let func = &self.stack[func as usize];
+                    self.func_index = func as usize;
+                    let func = &self.stack[self.func_index];
                     if let Value::Function(f) = func {
                         f(self);
                     } else {
