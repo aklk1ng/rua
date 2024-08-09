@@ -1,20 +1,20 @@
-use std::fs::File;
+use std::io::Read;
 
 use crate::byte_code::ByteCode;
 use crate::lex::{Lex, Token};
 use crate::value::Value;
 
 #[derive(Debug)]
-pub struct ParseProto {
+pub struct ParseProto<T: Read> {
     pub constants: Vec<Value>,
     pub byte_codes: Vec<ByteCode>,
     locals: Vec<String>,
-    lex: Lex,
+    lex: Lex<T>,
 }
 
-impl ParseProto {
-    pub fn load(input: File) -> ParseProto {
-        let mut proto = ParseProto {
+impl<T: Read> ParseProto<T> {
+    pub fn load(input: T) -> Self {
+        let mut proto = Self {
             constants: Vec::new(),
             byte_codes: Vec::new(),
             locals: Vec::new(),
@@ -71,7 +71,7 @@ impl ParseProto {
                 }
             }
             Token::String(s) => {
-                let code = self.load_const(iarg, Value::String(s));
+                let code = self.load_const(iarg, s);
                 self.byte_codes.push(code);
             }
             _ => panic!("expected string"),
@@ -106,7 +106,7 @@ impl ParseProto {
             self.load_exp(i);
         } else {
             // global variable
-            let dst = self.add_const(Value::String(var)) as u8;
+            let dst = self.add_const(var) as u8;
 
             let code = match self.lex.next() {
                 // from const values
@@ -123,9 +123,7 @@ impl ParseProto {
                 Token::Float(f) => {
                     ByteCode::SetGlobalConst(dst, self.add_const(Value::Float(f)) as u8)
                 }
-                Token::String(s) => {
-                    ByteCode::SetGlobalConst(dst, self.add_const(Value::String(s)) as u8)
-                }
+                Token::String(s) => ByteCode::SetGlobalConst(dst, self.add_const(s) as u8),
 
                 // from variable
                 Token::Name(var) => {
@@ -134,7 +132,7 @@ impl ParseProto {
                         ByteCode::SetGlobal(dst, i as u8)
                     } else {
                         // global variable
-                        ByteCode::SetGlobalGlobal(dst, self.add_const(Value::String(var)) as u8)
+                        ByteCode::SetGlobalGlobal(dst, self.add_const(var) as u8)
                     }
                 }
                 _ => panic!("invalid argument"),
@@ -143,7 +141,8 @@ impl ParseProto {
         }
     }
 
-    fn add_const(&mut self, c: Value) -> usize {
+    fn add_const(&mut self, c: impl Into<Value>) -> usize {
+        let c = c.into();
         let constants = &mut self.constants;
         constants.iter().position(|v| v == &c).unwrap_or_else(|| {
             constants.push(c);
@@ -151,7 +150,7 @@ impl ParseProto {
         })
     }
 
-    fn load_const(&mut self, dst: usize, c: Value) -> ByteCode {
+    fn load_const(&mut self, dst: usize, c: impl Into<Value>) -> ByteCode {
         ByteCode::LoadConst(dst as u8, self.add_const(c) as u16)
     }
 
@@ -161,7 +160,7 @@ impl ParseProto {
             ByteCode::Move(dst as u8, i as u8)
         } else {
             // global variable
-            let ic = self.add_const(Value::String(name));
+            let ic = self.add_const(name);
             ByteCode::GetGlobal(dst as u8, ic as u8)
         }
     }
@@ -183,7 +182,7 @@ impl ParseProto {
                 }
             }
             Token::Float(f) => self.load_const(dst, Value::Float(f)),
-            Token::String(s) => self.load_const(dst, Value::String(s)),
+            Token::String(s) => self.load_const(dst, s),
             Token::Name(var) => self.load_var(dst, var),
             _ => panic!("invalid argument"),
         };
